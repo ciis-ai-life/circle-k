@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#ffcc00">
+  <link rel="manifest" href="manifest.json">
+  <title>Circle-K — Control de Caducidades</title>
+  <!-- Librería de Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <style>
+    *{margin:0; padding:0; box-sizing:border-box; font-family:Arial, sans-serif}
+    body{background:#f8f9fa; color:#333; padding:1rem; max-width:800px; margin:0 auto}
+    .card{background:white; border-radius:12px; padding:1.5rem; margin-bottom:1rem; box-shadow:0 2px 8px rgba(0,0,0,.1)}
+    h1,h2{color:#222; margin-bottom:1rem}
+    input,button,select{width:100%; padding:.8rem; margin:.5rem 0; border:1px solid #ddd; border-radius:8px; font-size:1rem}
+    button{background:#ffcc00; border:none; font-weight:bold; cursor:pointer; transition:.2s}
+    button:hover{background:#ffc107}
+    .btn-danger{background:#e53935; color:white}
+    .btn-success{background:#43a047; color:white}
+    .hidden{display:none !important}
+    .product-item{border-bottom:1px solid #eee; padding:.8rem 0}
+    .aviso{padding:.7rem; border-radius:8px; margin:.5rem 0}
+    .aviso.alerta{background:#fff3cd; color:#856404}
+    .aviso.vencido{background:#f8d7da; color:#721c24}
+    .header{display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:.5rem}
+    .user-info{font-size:.9rem; color:#666}
+  </style>
+</head>
+<body>
+
+<!-- PANTALLA DE INICIO DE SESIÓN -->
+<div id="pantalla-login" class="card">
+  <h1>🔐 Acceso — Circle-K</h1>
+  <input type="email" id="correo" placeholder="Correo electrónico" value="xavidgeffen@gmail.com">
+  <input type="password" id="clave" placeholder="Contraseña">
+  <button onclick="iniciarSesion()">Entrar</button>
+  <p style="margin-top:1rem; font-size:.9rem; color:#666;">Solo personal autorizado</p>
+  <p id="mensaje-error" style="color:red; margin-top:.5rem;"></p>
+</div>
+
+<!-- PANTALLA PRINCIPAL DEL SISTEMA -->
+<div id="pantalla-sistema" class="hidden">
+  <div class="header">
+    <h1>🏪 Control de Caducidades</h1>
+    <div>
+      <span class="user-info" id="nombre-usuario"></span>
+      <button class="btn-danger" style="width:auto; padding:.5rem 1rem; margin-left:.5rem" onclick="cerrarSesion()">Salir</button>
+    </div>
+  </div>
+
+  <!-- FORMULARIO DE REGISTRO -->
+  <div class="card">
+    <h2>📝 Registrar Producto</h2>
+    <input type="text" id="prod-nombre" placeholder="Nombre del producto" required>
+    <input type="text" id="prod-codigo" placeholder="Código / Barras">
+    <input type="date" id="prod-caducidad">
+    <select id="prod-tipo">
+      <option value="normal">Normal</option>
+      <option value="ciclico">Cíclico</option>
+    </select>
+    <button class="btn-success" onclick="registrarProducto()">Guardar Producto</button>
+  </div>
+
+  <!-- LISTA DE PRODUCTOS -->
+  <div class="card">
+    <h2>📋 Productos Registrados</h2>
+    <div id="lista-productos"></div>
+  </div>
+
+  <!-- ZONA DE ADMINISTRADOR -->
+  <div id="zona-admin" class="card hidden">
+    <h2>👤 Administración — Agregar Empleado</h2>
+    <input type="email" id="nuevo-correo" placeholder="Correo del empleado">
+    <input type="password" id="nuevo-clave" placeholder="Contraseña (mínimo 6 caracteres)">
+    <button onclick="crearEmpleado()">Crear Cuenta</button>
+    <p id="msg-admin" style="margin-top:.5rem;"></p>
+  </div>
+</div>
+
+<script>
+// ==============================================
+// 🔧 TUS DATOS DE SUPABASE — TODO CONFIGURADO ✅
+// ==============================================
+const SUPABASE_URL = "https://gpaxoziaxcfsirddlefo.supabase.co";
+const SUPABASE_KEY = "sb_publishable_ANNfoJJFi5D2mWOWHjxZfA_t0DUIp5o";
+
+const ADMIN_CORREO = "xavidgeffen@gmail.com";
+
+// INICIALIZAR SUPABASE
+const { createClient } = window.supabase;
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ==============================================
+// 🔐 SESIÓN
+// ==============================================
+async function verificarSesion() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+    mostrarSistema(session.user);
+  }
+  
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (session) mostrarSistema(session.user);
+    else mostrarLogin();
+  });
+}
+
+function mostrarSistema(usuario) {
+  document.getElementById('pantalla-login').classList.add('hidden');
+  document.getElementById('pantalla-sistema').classList.remove('hidden');
+  document.getElementById('nombre-usuario').textContent = usuario.email;
+  
+  if (usuario.email === ADMIN_CORREO) {
+    document.getElementById('zona-admin').classList.remove('hidden');
+  }
+  
+  cargarProductos();
+}
+
+function mostrarLogin() {
+  document.getElementById('pantalla-login').classList.remove('hidden');
+  document.getElementById('pantalla-sistema').classList.add('hidden');
+}
+
+async function iniciarSesion() {
+  const correo = document.getElementById('correo').value;
+  const clave = document.getElementById('clave').value;
+  
+  const { error } = await supabase.auth.signInWithPassword({ email: correo, password: clave });
+  
+  if (error) {
+    document.getElementById('mensaje-error').textContent = "Error: Verifica correo y contraseña";
+  }
+}
+
+async function cerrarSesion() {
+  await supabase.auth.signOut();
+  document.getElementById('mensaje-error').textContent = "";
+}
+
+// ==============================================
+// 📦 REGISTRO Y LECTURA DE PRODUCTOS
+// ==============================================
+async function registrarProducto() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return alert("Debes iniciar sesión");
+
+  const nombre = document.getElementById('prod-nombre').value;
+  const codigo = document.getElementById('prod-codigo').value;
+  const caducidad = document.getElementById('prod-caducidad').value;
+  const tipo = document.getElementById('prod-tipo').value;
+
+  if (!nombre || !caducidad) return alert("Faltan datos obligatorios");
+
+  const { error } = await supabase.from('productos').insert([{
+    nombre, codigo, caducidad, tipo,
+    registrado_por: session.user.email,
+    fecha: new Date().toISOString()
+  }]);
+
+  if (error) return alert("Error: " + error.message);
+  
+  alert("✅ Producto registrado");
+  document.getElementById('prod-nombre').value = '';
+  document.getElementById('prod-codigo').value = '';
+  document.getElementById('prod-caducidad').value = '';
+}
+
+async function cargarProductos() {
+  const { data, error } = await supabase
+    .from('productos')
+    .select('*')
+    .order('fecha', { ascending: false });
+
+  if (error) return console.error(error);
+  
+  const lista = document.getElementById('lista-productos');
+  lista.innerHTML = '';
+  
+  const hoy = new Date();
+  
+  data.forEach(p => {
+    const fechaCad = new Date(p.caducidad);
+    const dias = Math.ceil((fechaCad - hoy) / (1000*60*60*24));
+    
+    let clase = '', etiqueta = '';
+    if (dias < 0) { clase = 'vencido'; etiqueta = '⚠️ VENCIDO'; }
+    else if (dias <= 7) { clase = 'alerta'; etiqueta = '⏰ Próximo'; }
+    
+    lista.innerHTML += `
+      <div class="product-item">
+        <strong>${p.nombre}</strong> — ${p.codigo || 'Sin código'}
+        <br>
+        Caducidad: ${p.caducidad} | ${p.tipo === 'ciclico' ? '🔄 Cíclico' : 'Normal'}
+        ${clase ? `<div class="aviso ${clase}">${etiqueta} — ${dias < 0 ? 'Hace ' + Math.abs(dias) + ' días' : 'Faltan ' + dias + ' días'}</div>` : ''}
+        <small>Registrado por: ${p.registrado_por}</small>
+      </div>
+    `;
+  });
+}
+
+// ==============================================
+// 👤 CREAR EMPLEADOS (SOLO ADMIN)
+// ==============================================
+async function crearEmpleado() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session || session.user.email !== ADMIN_CORREO) return;
+
+  const correo = document.getElementById('nuevo-correo').value;
+  const clave = document.getElementById('nuevo-clave').value;
+
+  if (!correo || clave.length < 6) {
+    return document.getElementById('msg-admin').innerHTML = `<span style="color:red">Error: Contraseña debe tener al menos 6 caracteres</span>`;
+  }
+
+  document.getElementById('msg-admin').innerHTML = 
+    `<span style="color:green">✅ Listo. Ve a Supabase → Authentication → Users → Add User<br>Correo: ${correo} | Contraseña: ${clave}</span>`;
+  
+  document.getElementById('nuevo-correo').value = '';
+  document.getElementById('nuevo-clave').value = '';
+}
+
+// Iniciar
+verificarSesion();
+</script>
+</body>
+    </html>
+  
