@@ -17,4 +17,4 @@ Sistema web para el control de inventario, productos cíclicos y seguimiento de 
 - `sw.js` — Soporte para funcionamiento sin conexión
 
 ---
-Proyecto desarrollado para optimizar el control de existencias y reducir pérdidas por caducidad.
+Proyecto desarrollado por: SERGIO JAVIER PARRA MURGUIA, para optimizar el control de existencias y reducir pérdidas por caducidad.
