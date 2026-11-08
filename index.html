@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Circle-K — Inventario</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --primario: #ffcc00;
+      --ok: #2e7d32;
+      --warn: #f57c00;
+      --peligro: #d32f2f;
+    }
+    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding-bottom: 50px; background: #f8f9fa; }
+    .card { margin-bottom: 1rem; border-radius: 12px; box-shadow: 0 2px 6px #0000000f; }
+    .alerta-stock { background: #ffebee; border-left: 4px solid var(--peligro); }
+    .alerta-vencimiento { background: #fff3e0; border-left: 4px solid var(--warn); }
+    #lector { max-width: 500px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <main>
+    <nav class="navbar navbar-dark bg-dark mb-4">
+      <div class="container d-flex justify-content-between align-items-center">
+        <h1 class="navbar-brand mb-0 fs-4">📦 Inventario Circle-K</h1>
+      </div>
+    </nav>
+
+    <div class="container">
+      <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+          <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#lista" type="button">Lista</button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" data-bs-toggle="tab" data-bs-target="#agregar" type="button">Agregar</button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" data-bs-toggle="tab" data-bs-target="#escanear" type="button">Escanear</button>
+        </li>
+      </ul>
+
+      <div class="tab-content">
+        <section class="tab-pane fade show active" id="lista">
+          <div class="row mb-3">
+            <div class="col-md-8 mb-2">
+              <input type="search" id="buscar" class="form-control" placeholder="🔍 Buscar producto...">
+            </div>
+            <div class="col-md-4 mb-2">
+              <select id="filtro" class="form-select">
+                <option value="todos">Todos los productos</option>
+                <option value="bajo">Stock bajo</option>
+                <option value="vencen">Por caducar</option>
+              </select>
+            </div>
+          </div>
+          <div id="contenedorLista"></div>
+        </section>
+
+        <section class="tab-pane fade" id="agregar">
+          <div class="card p-3">
+            <h2 class="h5 mb-3">➕ Nuevo producto</h2>
+            <form id="formProducto">
+              <div class="mb-2">
+                <label class="form-label" for="codigo">Código de barras</label>
+                <input type="text" id="codigo" class="form-control" required>
+              </div>
+              <div class="mb-2">
+                <label class="form-label" for="nombre">Nombre</label>
+                <input type="text" id="nombre" class="form-control" required>
+              </div>
+              <div class="mb-2">
+                <label class="form-label" for="categoria">Categoría</label>
+                <select id="categoria" class="form-select">
+                  <option>Bebidas</option><option>Alimentos</option><option>Snacks</option>
+                  <option>Limpieza</option><option>Higiene</option><option>Otros</option>
+                </select>
+              </div>
+              <div class="row mb-2">
+                <div class="col">
+                  <label class="form-label" for="cantidad">Cantidad</label>
+                  <input type="number" id="cantidad" class="form-control" min="0" step="1" required>
+                </div>
+                <div class="col">
+                  <label class="form-label" for="precio">Precio ($ MXN)</label>
+                  <input type="number" id="precio" class="form-control" min="0" step="0.01" required>
+                </div>
+              </div>
+              <div class="row mb-3">
+                <div class="col">
+                  <label class="form-label" for="fechaEntrada">Fecha de entrada</label>
+                  <input type="date" id="fechaEntrada" class="form-control">
+                </div>
+                <div class="col">
+                  <label class="form-label" for="fechaCaducidad">Fecha de caducidad</label>
+                  <input type="date" id="fechaCaducidad" class="form-control">
+                </div>
+              </div>
+              <button type="submit" class="btn btn-success w-100">Guardar producto</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="tab-pane fade" id="escanear">
+          <div class="card p-3 text-center">
+            <h2 class="h5 mb-3">📷 Escanear código</h2>
+            <div id="lector"></div>
+            <button class="btn btn-primary mt-2" id="btnCamara" type="button">Activar cámara</button>
+            <button class="btn btn-secondary mt-2 d-none" id="btnDetenerCamara" type="button">Detener cámara</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script>
+    // === CONFIGURACIÓN ===
+    const SUPABASE_URL = 'https://gpaxoziaxcsfirdietleo.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_ANNfoJJFi5D2mWOWHjxZfA_t0DUIp5o';
+    const NOMBRE_TABLA = 'productos';
+    const UMBRAL_STOCK = 5;
+    const DIAS_AVISO_CADUCIDAD = 7;
+
+    // === INICIALIZACIÓN ===
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    let inventario = [];
+    let lectorCamara = null;
+    const $ = (id) => document.getElementById(id);
+
+    // === UTILIDADES ===
+    function escaparHTML(valor) {
+      return String(valor ?? '').replace(/[&<>"']/g, (caracter) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[caracter]));
+    }
+
+    function fechaLocalHoy() {
+      const ahora = new Date();
+      const desfase = ahora.getTimezoneOffset() * 60000;
+      return new Date(ahora.getTime() - desfase).toISOString().slice(0, 10);
+    }
+
+    // === CARGAR INVENTARIO ===
+    async function cargarInventario() {
+      const contenedor = $('contenedorLista');
+      contenedor.innerHTML = '<p class="text-muted">Cargando productos…</p>';
+
+      const { data, error } = await supabaseClient
+        .from(NOMBRE_TABLA)
+        .select('*')
+        .order('nombre', { ascending: true });
+
+      if (error) {
+        console.error('Error al cargar:', error);
+        contenedor.innerHTML = '<div class="alert alert-danger">No se pudo cargar el inventario. Revisa la tabla y permisos en Supabase.</div>';
+        return;
+      }
+
+      inventario = data || [];
+      dibujarInventario();
+    }
+
+    // === FILTROS ===
+    function productoEstaPorCaducar(producto) {
+      if (!producto.fecha_caducidad) return false;
+      const hoy = new Date(`${fechaLocalHoy()}T00:00:00`);
+      const cad = new Date(`${producto.fecha_caducidad}T00:00:00`);
+      const dias = Math.ceil((cad - hoy) / 86400000);
+      return dias >= 0 && dias <= DIAS_AVISO_CADUCIDAD;
+    }
+
+    // === RENDERIZAR LISTA ===
+    function dibujarInventario() {
+      const contenedor = $('contenedorLista');
+      const busqueda = $('buscar').value.trim().toLowerCase();
+      const filtro = $('filtro').value;
+
+      const productos = inventario.filter(p => {
+        const texto = [p.nombre, p.codigo, p.categoria].join(' ').toLowerCase();
+        const coincide = texto.includes(busqueda);
+        const bajo = Number(p.cantidad) <= UMBRAL_STOCK;
+        const porCaducar = productoEstaPorCaducar(p);
+        if (!coincide) return false;
+        if (filtro === 'bajo' && !bajo) return false;
+        if (filtro === 'vencen' && !porCaducar) return false;
+        return true;
+      });
+
+      if (productos.length === 0) {
+        contenedor.innerHTML = '<div class="alert alert-info">No hay productos que coincidan.</div>';
+        return;
+      }
+
+      contenedor.innerHTML = productos.map(p => {
+        const stockBajo = Number(p.cantidad) <= UMBRAL_STOCK;
+        const porCaducar = productoEstaPorCaducar(p);
+        const clases = ['card', 'p-3', stockBajo ? 'alerta-stock' : '', porCaducar ? 'alerta-vencimiento' : ''].filter(Boolean).join(' ');
+        const precio = Number(p.precio || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+
+        return `
+          <article class="${clases}">
+            <div class="d-flex justify-content-between align-items-start gap-3">
+              <div>
+                <h3 class="h5 mb-1">${escaparHTML(p.nombre)}</h3>
+                <div class="text-muted small">
+                  Código: ${escaparHTML(p.codigo || '—')} · Categoría: ${escaparHTML(p.categoria || 'Otros')}
+                </div>
+                <div class="mt-2">
+                  Cantidad: <strong>${escaparHTML(p.cantidad)}</strong> · Precio: <strong>${precio}</strong>
+                </div>
+                <div class="small text-muted">
+                  Caducidad: ${escaparHTML(p.fecha_caducidad || 'No indicada')}
+                </div>
+              </div>
+              <button
+                class="btn btn-sm btn-outline-danger"
+                type="button"
+                data-eliminar="${escaparHTML(p.id)}"
+                aria-label="Eliminar ${escaparHTML(p.nombre)}"
+              >Eliminar</button>
+            </div>
+          </article>
+        `;
+      }).join('');
+    }
+
+    // === GUARDAR PRODUCTO ===
+    async function guardarProducto(evento) {
+      evento.preventDefault();
+      const datos = {
+        codigo: $('codigo').value.trim(),
+        nombre: $('nombre').value.trim(),
+        categoria: $('categoria').value,
+        cantidad: Number($('cantidad').value),
+        precio: Number($('precio').value),
+        fecha_entrada: $('fechaEntrada').value || null,
+        fecha_caducidad: $('fechaCaducidad').value || null
+      };
+
+      const boton = $('formProducto').querySelector('button[type="submit"]');
+      boton.disabled = true;
+      boton.textContent = 'Guardando…';
+
+      const existe = inventario.find(p => p.codigo === datos.codigo);
+      const { error } = existe
+        ? await supabaseClient.from(NOMBRE_TABLA).update(datos).eq('codigo', datos.codigo)
+        : await supabaseClient.from(NOMBRE_TABLA).insert(datos);
+
+      boton.disabled = false;
+      boton.textContent = 'Guardar producto';
+
+      if (error) {
+        console.error('Error:', error);
+        alert('No se pudo guardar. Revisa la tabla y permisos en Supabase.');
+        return;
+      }
+
+      alert(existe ? '✅ Producto actualizado' : '✅ Producto guardado');
+      $('formProducto').reset();
+      $('fechaEntrada').value = fechaLocalHoy();
+      await cargarInventario();
+      bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#lista"]')).show();
+    }
+
+    // === ELIMINAR PRODUCTO ===
+    async function eliminarProducto(id) {
+      if (!confirm('¿Quieres eliminar este producto?')) return;
+      const { error } = await supabaseClient
+        .from(NOMBRE_TABLA)
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.error('Error al eliminar:', error);
+        alert('No se pudo eliminar. Revisa los permisos en Supabase.');
+        return;
+      }
+
+      await cargarInventario();
+    }
+
+    // === ESCANEAR CÓDIGO ===
+    async function activarCamara() {
+      if (!window.Html5Qrcode) {
+        alert('No se pudo cargar el lector de códigos.');
+        return;
+      }
+
+      if (!lectorCamara) {
+        lectorCamara = new Html5Qrcode('lector');
+      }
+
+      $('btnCamara').classList.add('d-none');
+      $('btnDetenerCamara').classList.remove('d-none');
+
+      try {
+        await lectorCamara.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 250, height: 150 } },
+          async (codigoLeido) => {
+            $('codigo').value = codigoLeido;
+            bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#agregar"]')).show();
+            await detenerCamara();
+          },
+          () => {}
+        );
+      } catch (error) {
+        console.error('No se pudo iniciar la cámara:', error);
+        alert('No se pudo activar la cámara. Permite el acceso y abre la página con HTTPS.');
+        $('btnCamara').classList.remove('d-none');
+        $('btnDetenerCamara').classList.add('d-none');
+        lectorCamara = null;
+      }
+    }
+
+    async function detenerCamara() {
+      if (lectorCamara) {
+        try {
+          await lectorCamara.stop();
+          lectorCamara.clear();
+        } catch (error) {
+          console.warn('La cámara ya estaba detenida:', error);
+        }
+        lectorCamara = null;
+      }
+      $('btnCamara').classList.remove('d-none');
+      $('btnDetenerCamara').classList.add('d-none');
+    }
+
+    // === ASIGNAR EVENTOS ===
+    $('formProducto').addEventListener('submit', guardarProducto);
+    $('buscar').addEventListener('input', dibujarInventario);
+    $('filtro').addEventListener('change', dibujarInventario);
+    $('btnCamara').addEventListener('click', activarCamara);
+    $('btnDetenerCamara').addEventListener('click', detenerCamara);
+
+    $('contenedorLista').addEventListener('click', (evento) => {
+      const boton = evento.target.closest('[data-eliminar]');
+      if (boton) eliminarProducto(boton.dataset.eliminar);
+    });
+
+    // === INICIO AUTOMÁTICO ===
+    document.addEventListener('DOMContentLoaded', () => {
+      if (!$('fechaEntrada').value) {
+        $('fechaEntrada').value = fechaLocalHoy();
+      }
+      cargarInventario();
+    });
+  </script>
+</body>
+</html>
